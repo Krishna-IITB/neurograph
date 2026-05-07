@@ -1,0 +1,41 @@
+{
+  "_comment": "Starter QA set. Each entry needs gold_chunk_id once PDFs are ingested; add them after the first ingestion run prints chunk IDs.",
+  "_placeholder": true,
+  "qa_pairs": [
+    {
+      "id": "q1",
+      "question": "Who is the CEO of Tesla?",
+      "expected_answer": "Elon Musk",
+      "gold_chunk_id": null,
+      "type": "single_hop"
+    },
+    {
+      "id": "q2",
+      "question": "How is Elon Musk connected to Mars colonization?",
+      "expected_answer": "Elon Musk founded SpaceX, whose stated mission includes colonizing Mars.",
+      "gold_chunk_id": null,
+      "type": "multi_hop"
+    },
+    {
+      "id": "q3",
+      "question": "When was Tesla founded?",
+      "expected_answer": "2003",
+      "gold_chunk_id": null,
+      "type": "single_hop"
+    },
+    {
+      "id": "q4",
+      "question": "Which companies has the founder of SpaceX also led?",
+      "expected_answer": "Tesla, Neuralink, The Boring Company, X (formerly Twitter).",
+      "gold_chunk_id": null,
+      "type": "multi_hop"
+    },
+    {
+      "id": "q5",
+      "question": "Who acquired SolarCity?",
+      "expected_answer": "Tesla",
+      "gold_chunk_id": null,
+      "type": "single_hop"
+    }
+  ]
+}

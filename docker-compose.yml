@@ -1,0 +1,23 @@
+services:
+  api:
+    build: .
+    container_name: neurograph-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+
+  ui:
+    build: .
+    container_name: neurograph-ui
+    command: streamlit run neurograph/ui/app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "${UI_PORT:-8501}:8501"
+    env_file:
+      - .env
+    depends_on:
+      - api
+    restart: unless-stopped
