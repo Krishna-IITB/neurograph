@@ -1,460 +1,204 @@
-# Zeotap Durable Execution Engine
+# NeuroGraph — Graph-Augmented RAG over PDFs
 
-**GitHub:** [https://github.com/Krishna-IITB/zeotap-durable-engine](https://github.com/Krishna-IITB/zeotap-durable-engine)
+> Hybrid retrieval system combining **semantic vector search** with **knowledge-graph reasoning** over unstructured PDFs. Multi-hop questions, citations, semantic caching, and a full evaluation suite.
 
----
-
-## 📋 Submission Information
-
-**Assignment:** Software Engineer Intern - Zeotap  
-**Submitted By:** Krishna, IIT Bombay (Electrical Engineering - Dual Degree)  
-**Submission Deadline:** January 26, 2026  
-**Contact:** krishnasingh89200@gmail.com  
-
-This repository contains Assignment 1: Building a Native Durable Execution Engine. All code, tests, and documentation are included. The assignment demonstrates crash recovery, parallel execution, and automatic sequence ID generation (bonus challenge).
+![Python](https://img.shields.io/badge/python-3.11+-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Docker](https://img.shields.io/badge/docker-ready-blue)
+![Tests](https://img.shields.io/badge/tests-77%20passing-brightgreen)
 
 ---
 
-## Overview
+## Why this exists
 
-A production-ready durable workflow execution engine that survives process crashes and resumes from the exact point of failure. Unlike standard programs where a crash wipes memory and requires a full restart, this engine uses SQLite persistence to enable crash recovery, memoization, and parallel execution.
+Vanilla RAG retrieves chunks that are *semantically similar* to a query. It struggles with questions that span multiple documents or hops, like:
 
-Inspired by durable execution patterns used in DBOS, Temporal, Cadence, and Azure Durable Functions.
+> *"How is Elon Musk connected to Mars colonization?"*
 
----
+because no single chunk contains the full chain. NeuroGraph builds **two parallel indexes** from the same PDFs — a dense vector store for fuzzy similarity and a knowledge graph for explicit relationships — then **fuses them at query time** before sending context to the LLM.
 
-## Key Features
-
-- **Crash Recovery**: Process can die at any point and resume without re-executing completed steps
-- **Memoization**: Completed steps are automatically cached and skipped on restart
-- **Parallel Execution**: Multiple steps can run concurrently with thread-safe database writes
-- **Loop Support**: Handles loops with unique sequence tracking per iteration
-- **Conditional Logic**: Supports branching (if/else) without ID collisions
-- **Type Safety**: Generic-based Step primitive supports any return type
-- **Zero DSLs**: Pure idiomatic Go code, no custom XML or orchestrators
-- **Automatic Sequence IDs**: No manual step ID management (Bonus Challenge Implemented)
+| Question type | Vanilla RAG | NeuroGraph (Hybrid) |
+| --- | --- | --- |
+| *"What is X?"* (single-hop) | ✅ | ✅ |
+| *"How is X linked to Y?"* (multi-hop) | ❌ guesses | ✅ traverses |
+| *"Who founded the company that owns X?"* | ❌ | ✅ |
 
 ---
 
 ## Architecture
 
-### Core Components
+```mermaid
+flowchart LR
+    subgraph Ingestion
+        PDF[PDFs] --> Loader[PyPDFLoader]
+        Loader --> Chunker[Recursive Splitter<br/>500 / 50]
+        Chunker --> Cleaner[LLM Semantic Cleaner]
+    end
 
-```
-zeotap-durable-engine/
-├── engine/
-│   ├── context.go            # Workflow execution context
-│   ├── step.go               # Generic step primitive
-│   ├── storage.go            # SQLite persistence layer
-│   ├── workflow.go           # Workflow runner
-│   └── workflow_test.go      # Automated tests
-├── examples/
-│   ├── onboarding/           # Employee onboarding workflow
-│   ├── loop_test/            # Loop iteration tracking
-│   ├── conditional_test/     # Branching logic
-│   └── zombie_test/          # Crash-before-save recovery
-├── main/
-│   └── main.go               # CLI entry point
-├── go.mod
-├── go.sum
-├── README.md
-└── Prompts.txt
-```
+    Cleaner --> Embed[Embedding<br/>all-MiniLM-L6-v2]
+    Cleaner --> Triplet[Triplet Extractor<br/>Llama-3.3 70B]
+    Embed --> Chroma[(ChromaDB)]
+    Triplet --> Resolver[Entity Resolver<br/>Levenshtein]
+    Resolver --> Cypher[Cypher MERGE Builder]
+    Cypher --> Neo4j[(Neo4j AuraDB)]
 
-### How It Works
-
-1. **Step Execution**: Developer wraps side-effect code in `engine.Step()`
-2. **Memoization Check**: Engine queries SQLite to see if step already completed
-3. **Conditional Execution**: If cached, return stored result. If not, execute function
-4. **Persistence**: Save result to database with unique key (workflow_id + step_key)
-5. **Crash Recovery**: On restart, completed steps are skipped, incomplete steps re-execute
-
-### Sequence Management (Bonus Challenge)
-
-To support loops and conditional logic, the engine uses an atomic counter to generate unique step keys:
-
-```go
-// Context maintains a sequence counter
-func (c *Context) getNextSequence() int64 {
-    return atomic.AddInt64(&c.sequenceID, 1)
-}
-
-// Step keys are generated as: <step_id>_<sequence>
-// Example: loop_step_1, loop_step_2, loop_step_3
+    Q[User Query] --> Cache{Redis cache<br/>cosine ≥ 0.95?}
+    Cache -- hit --> Out[Answer]
+    Cache -- miss --> VR[Vector Retrieval<br/>top-k]
+    Cache -- miss --> GR[Graph Retrieval<br/>2-hop traversal]
+    VR --> Fuse[Hybrid Context]
+    GR --> Fuse
+    Fuse --> Gen[Llama-3.3 70B<br/>via Groq]
+    Gen --> Out
+    Out -.write.-> Cache
 ```
 
-This ensures:
-- Same step ID called multiple times gets unique database keys
-- No manual string ID management required
-- Thread-safe using atomic operations
+![Knowledge graph visualization](docs/images/graph_visualization.png)
+*Subset of the knowledge graph after ingesting Wikipedia articles on Elon Musk, Tesla, and SpaceX. 626 entities, 1017 relationships extracted via LLM and stored in Neo4j AuraDB. The Elon Musk node has the highest centrality, fanning out to companies, family members, places, and events.*
 
 ---
 
-## Database Schema
+## Tech stack
 
-**Table: steps**
-
-| Column | Type | Description |
-|--------|------|-------------|
-| workflow_id | TEXT | Unique identifier for workflow instance |
-| step_key | TEXT | Step ID + sequence number (e.g., "create_record_1") |
-| status | TEXT | Execution status ("completed") |
-| output | TEXT | JSON-serialized step result |
-
-**Primary Key:** `(workflow_id, step_key)` - Ensures no duplicate steps per workflow
-
-### SQL Schema
-
-```sql
-CREATE TABLE IF NOT EXISTS steps (
-  workflow_id TEXT NOT NULL,
-  step_key    TEXT NOT NULL,
-  status      TEXT NOT NULL,
-  output      TEXT,
-  PRIMARY KEY (workflow_id, step_key)
-);
-```
+| Layer | Choice | Why |
+| --- | --- | --- |
+| LLM | **Llama-3.3-70B** via [Groq](https://groq.com) | free tier, ~300 tok/s, no GPU needed |
+| Embeddings | `sentence-transformers/all-MiniLM-L6-v2` | 384-dim, runs locally on M-series Mac with Metal acceleration |
+| Vector DB | **ChromaDB** (persistent client) | zero-config, local-first |
+| Graph DB | **Neo4j AuraDB** (free tier) | managed, Cypher, multi-hop native |
+| Cache | **Upstash Redis** (free tier) | serverless, semantic caching with 0.95 cosine threshold |
+| Backend | **FastAPI** + Pydantic | typed contracts |
+| Frontend | **Streamlit** | quickest path to a recruiter-friendly demo |
+| Orchestration | **LangChain** | loaders, splitters, prompt templating |
+| Containers | **Docker + docker-compose** | one-command spin-up |
+| Eval | RAGAS-style: Token Recall, Faithfulness, Answer Relevance, Correctness | full retrieval + generation coverage |
 
 ---
 
-## Quick Start
-
-### Prerequisites
-
-- Go 1.21 or higher
-- SQLite (automatically included via mattn/go-sqlite3)
-
-### Installation
+## Quick start
 
 ```bash
-# Clone repository
-git clone https://github.com/Krishna-IITB/zeotap-durable-engine.git
-cd zeotap-durable-engine
+git clone https://github.com/Krishna-IITB/neurograph.git
+cd neurograph
+conda create -n neurograph python=3.11 -y
+conda activate neurograph
+make install                     # installs deps + project as editable package
+cp .env.example .env             # fill in 3 keys: GROQ, NEO4J, REDIS
 
-# Install dependencies
-go mod download
-
-# Build application
-go build -o app ./main
+python -m scripts.download_samples            # bundled Wikipedia PDFs
+python -m scripts.ingest data/sample_pdfs --index --max-graph-chunks 500
+streamlit run neurograph/ui/app.py            # opens at http://localhost:8501
 ```
 
-### Basic Usage
-
-```bash
-# Run a workflow
-./app workflow_001 onboarding
-
-# Run with specific demo
-./app demo onboarding           # Employee onboarding
-./app loop_demo loop            # Loop test
-./app zombie_demo zombie        # Zombie step test
-```
-
-### Crash Simulation
-
-```bash
-# Start workflow
-./app workflow_001 onboarding
-
-# Press Ctrl+C after Step 1 completes (simulates crash)
-^C
-
-# Resume (same workflow_id) - Step 1 will be skipped
-./app workflow_001 onboarding
-```
-
-### Database Inspection
-
-```bash
-# View all completed steps
-sqlite3 workflow.db "SELECT workflow_id, step_key, status FROM steps;"
-
-# View full details
-sqlite3 workflow.db "SELECT * FROM steps;"
-```
+To use your own PDFs: drop them into `data/sample_pdfs/` and re-run `make ingest`, or use the **Ingest** tab in the Streamlit UI (see screenshot below).
 
 ---
 
-## Usage Examples
+## UI
 
-### 1. Employee Onboarding Workflow
+![System status sidebar](docs/images/ui_status.png)
+*Status sidebar with all four backends green: Llama-3.3-70B via Groq, ChromaDB with 1875 chunks, Neo4j with 626 nodes / 1017 relationships, and Upstash Redis cache. Mode toggle (vector / graph / hybrid), top-k slider, and graph-hops slider expose retrieval knobs.*
+
+![Streamlit Ask tab](docs/images/ui_ask.png)
+*Live hybrid query "When was Tesla founded and by whom?" answered in 1791ms. The right panel shows latency and cache-miss indicator. Below, vector chunks (left) and graph paths (right) are displayed side-by-side as transparent provenance — every fact in the answer can be traced back to its source.*
+
+![Ingest tab](docs/images/ui_ingest.png)
+*Drag-and-drop PDF ingestion. Toggle vector indexing (fast, ~30s) and graph indexing (slow but enables multi-hop reasoning). Re-uploading is idempotent thanks to stable chunk IDs and Cypher MERGE.*
+
+---
+
+## Evaluation
+
+The `scripts/run_eval.py` runner evaluates **3 retrieval modes × 4 metrics** over a hand-curated 18-question gold set spanning all bundled PDFs:
 
 ```bash
-./app workflow_001 onboarding
+python -m scripts.run_eval
 ```
 
-**Steps:**
-- Step 1: Create employee record (sequential)
-- Step 2 & 3: Provision laptop + Setup email access (parallel - 33% faster)
-- Step 4: Send welcome email (sequential)
+![Eval terminal output](docs/images/eval_results.png)
+*Live terminal output of the eval suite. The runner logs per-question results to a JSON file under `eval_results/` and prints a Markdown table ready to paste into this README.*
 
-**Crash Recovery Test:**
+### Results (18 questions)
 
-```bash
-# Start workflow
-./app workflow_001 onboarding
+| Mode | Token Recall ↑ | Faithfulness ↑ | Answer Relevance ↑ | Correctness ↑ | Avg Latency (ms) |
+| --- | --- | --- | --- | --- | --- |
+| Vector only | **1.000** | 4.56 | **4.11** | **3.89** | 8138 |
+| Graph only | 0.333 | 2.94 | 2.00 | 1.72 | 6575 |
+| Hybrid | **1.000** | **4.61** | 3.94 | 3.83 | 13601 |
 
-# Press Ctrl+C after Step 1 completes
-^C
+**Token Recall** = fraction of questions where the expected answer's content tokens appear in the retrieved context (RAGAS-style `context_recall`).
+**Faithfulness / Relevance / Correctness** = LLM-as-judge scores on a 1-5 scale.
 
-# Resume - Step 1 will be skipped!
-./app workflow_001 onboarding
-```
+### Interpretation
 
-### 2. Loop Support Test
+For Wikipedia-style factual content with mostly single-hop questions, **vector RAG is already very strong** — 100% recall and high faithfulness. Adding graph paths in hybrid mode delivers a real but modest improvement on **Faithfulness (4.61 vs 4.56)** because the graph acts as a verification signal that helps the LLM stay grounded.
 
-```bash
-./app loop_demo loop
-```
+The cost is real too: hybrid retrieval roughly **doubles latency** (parallel vector + graph traversal + LLM entity extraction) and slightly lowers Relevance because graph paths can introduce noise (e.g., personal-life chains for business questions).
 
-Demonstrates sequence tracking for 3 iterations of the same step.
+**Production routing strategy**: route single-hop factual queries to `vector` mode by default, escalate to `hybrid` for multi-hop or cross-document questions. Graph-only mode is weakest standalone (33% recall) — its value is as augmentation, not replacement.
 
-### 3. Conditional Logic Test
+### Cache impact
 
-```bash
-./app cond_demo conditional
-```
+![Semantic cache hit](docs/images/ui_cache_hit.png)
+*Cache hit on a paraphrased query: cosine similarity = 1.000, latency drops from 1791ms (cold) to **393ms** (cached). The cache uses sentence embeddings, so semantically equivalent queries — even with different wording — hit the same entry.*
 
-Shows branching (if/else) without step ID collisions.
+| Path | Latency |
+| --- | --- |
+| Cache hit (cosine ≥ 0.95) | ~50-400 ms |
+| Cache miss (full hybrid pipeline) | ~8-14 s |
 
-### 4. Zombie Step Problem Test
-
-```bash
-./app zombie_demo zombie
-
-# Press Ctrl+C during "3 second delay" message
-# Resume to see crash-before-save recovery
-./app zombie_demo zombie
-```
+A **~30× speedup** on repeat or paraphrased queries with no extra infrastructure beyond a free-tier Redis.
 
 ---
 
-## Testing
+## Project layout
 
-### Automated Tests
-
-```bash
-# Run unit tests with verbose output
-go test ./engine -v
-
-# Expected output:
-# === RUN   TestStepMemoization
-# --- PASS: TestStepMemoization (0.00s)
-# === RUN   TestConcurrentWrites
-# --- PASS: TestConcurrentWrites (0.00s)
-# PASS
-# ok      zeotap-durable-engine/engine    0.123s
+```
+neurograph/
+├── ingestion/     # PDF → cleaned chunks
+├── indexing/      # parallel: ChromaDB + Neo4j
+├── retrieval/     # vector + graph + hybrid fusion
+├── generation/    # Groq client + prompts + QA engine
+├── cache/         # Redis semantic cache (0.95 threshold)
+├── eval/          # Token Recall, Faithfulness, Relevance, Correctness
+├── api/           # FastAPI service
+└── ui/            # Streamlit app
 ```
 
-**Tests Included:**
-- `TestStepMemoization`: Verifies steps execute once and skip on re-run
-- `TestConcurrentWrites`: Validates thread-safe parallel database writes
-
-### Manual Test Coverage
-
-| Test Scenario | Validated |
-|--------------|-----------|
-| Basic workflow execution | ✅ |
-| Crash recovery (onboarding) | ✅ |
-| Idempotency (skip completed) | ✅ |
-| Parallel execution timing | ✅ (4.4s vs 6s) |
-| Thread safety | ✅ (no SQLITE_BUSY) |
-| Loop support | ✅ |
-| Loop crash recovery | ✅ |
-| Conditional logic | ✅ |
-| Zombie step handling | ✅ |
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for a deeper module-by-module walkthrough and design decisions.
 
 ---
 
-## Non-Functional Features
+## Design decisions worth highlighting
 
-### Performance Optimizations
-
-- **Lock-Free Sequence Generation**: Uses `atomic.AddInt64()` for O(1) step ID generation
-- **Query Optimization**: Single database query per step check (no N+1 problems)
-- **Parallel Execution**: Concurrent steps execute simultaneously (33% faster: 4.4s vs 6s)
-- **Minimal Memory Footprint**: Streams results without loading entire workflow history
-- **Connection Pooling**: SQLite connection reused across workflow execution
-
-### Security
-
-- **SQL Injection Protection**: All queries use parameterized statements (? placeholders)
-- **Input Validation**: Workflow IDs validated before database operations
-- **Error Safety**: Errors logged with context but don't expose internal details
-- **No Hardcoded Credentials**: Database path is configurable
-
-### Reliability & Resilience
-
-- **Atomic Database Operations**: All writes are transactional (all-or-nothing)
-- **Crash Recovery**: Process can terminate at any point and resume cleanly
-- **Zombie Step Handling**: 
-  - **Problem**: Process crashes after step executes but before database save
-  - **Solution**: Step re-executes on resume (at-least-once semantics)
-  - **Guarantee**: No persisted state is lost; idempotent operations recommended to avoid duplicate side-effects
-  - **Example**: Database UPSERTs, check-before-write patterns ensure safety
-- **Thread-Safe Writes**: Mutex-based synchronization (serialized writes on single DB connection) prevents SQLITE_BUSY errors
-- **At-Least-Once Execution**: Idempotent operations recommended for exactly-once semantics
-
-### Observability & Debugging
-
-- **Structured Logging**: Clear prefixes ([RUN], [SKIP], [DONE]) for step lifecycle
-- **Step Tracing**: Every step logged with unique key (e.g., `create_record_1`)
-- **Database Inspection**: SQLite file can be queried directly for workflow state
-
-```bash
-sqlite3 workflow.db "SELECT * FROM steps;"
-```
-
-- **Error Context**: All errors include step ID, workflow ID, and operation type
-
-### Concurrency Model
-
-- **Goroutine-Based Parallelism**: Steps can spawn goroutines for fan-out execution
-- **Fan-In Pattern**: Parent step waits for all parallel children via channels
-- **Mutex Protection**: Database writes are serialized to prevent race conditions (single connection with mutex lock)
-- **No Deadlocks**: Lock acquisition order is consistent
+- **Why dual-index instead of GraphRAG-only?** Graph traversal is brittle when entities are misspelled or entirely unmentioned. Vector search catches the long tail; graph adds reasoning. Hybrid wins on both axes of recall.
+- **Why `MERGE` not `CREATE` in Cypher?** Idempotent ingestion — re-running the pipeline doesn't duplicate nodes.
+- **Why a 0.95 cosine threshold on the cache?** Empirically calibrated. At 0.80 we got false positives ("CEO of Tesla" hitting "founder of Tesla"). At 0.99 cache hit-rate dropped to ~5%. 0.95 is the sweet spot.
+- **Why fuzzy entity resolution?** The same real-world entity often shows up as "Tesla" / "Tesla Inc" / "Tesla Motors". Levenshtein-based matching unifies them before writing to Neo4j.
+- **Why no fine-tuning?** This is an inference + retrieval system. Evaluation uses retrieval + generation metrics, not training loss.
 
 ---
 
-## Known Limitations
+## Roadmap
 
-- **At-Least-Once Semantics**: If process crashes after step execution but before database save, step will re-execute on resume. Recommend idempotent operations (e.g., UPSERTs, check-before-write).
-- **Single-Node Engine**: Designed for single-process execution. Multi-node distributed durability requires additional coordination (out of scope).
-- **SQLite Concurrency**: Mutex-based writes eliminate SQLITE_BUSY in typical scenarios, but extreme contention may surface transient errors.
-
----
-
-## Assignment Requirements Checklist
-
-### Deliverables
-
-- ✅ **engine/**: Core library with Context, Step primitive, Storage, and Workflow runner
-- ✅ **examples/onboarding/**: Employee onboarding with sequential + parallel steps
-- ✅ **main/App**: CLI tool for starting workflows and simulating crashes
-- ✅ **README.md**: This comprehensive documentation
-- ✅ **Prompts.txt**: All prompts utilized across AI tooling
-
-### Functional Requirements
-
-- ✅ **Workflow Runner**: NewWorkflow() and Run() implemented
-- ✅ **Step Primitive**: Generic Step[T any]() with type safety
-- ✅ **Resilience**: Crash recovery tested extensively
-- ✅ **Concurrency**: Parallel steps with thread-safe database writes
-
-### Persistence Layer
-
-- ✅ **RDBMS**: SQLite with proper schema
-- ✅ **Steps Table**: workflow_id, step_key, status, output
-- ✅ **Unique Constraint**: Composite primary key prevents duplicates
-- ✅ **Serialization**: JSON for storing step results
-
-### Technical Constraints
-
-- ✅ **Type Safety**: Go generics used throughout
-- ✅ **Serialization**: Standard encoding/json library
-- ✅ **No DSLs**: Pure idiomatic Go code
-
-### Evaluation Criteria
-
-- ✅ **Correctness**: Skips completed steps on restart
-- ✅ **Concurrency**: Handles parallel writes without SQLITE_BUSY
-- ✅ **Cleanliness**: Idiomatic Go API, clear function signatures
-- ✅ **Resilience**: Zombie step problem solved
-- ✅ **Testcases**: Automated tests included
-
-### Bonus Challenge
-
-- ✅ **Automatic Sequence ID**: Implemented using atomic counter (no manual IDs needed)
+- [x] Phase 1A — PDF loading + chunking + cleaning
+- [x] Phase 1B — Dual indexing (ChromaDB + Neo4j with fuzzy entity resolution)
+- [x] Phase 2 — Hybrid retrieval + Groq generation
+- [x] Phase 3 — Semantic cache + Streamlit UI + Docker
+- [x] Phase 4 — Evaluation suite (Token Recall, Faithfulness, Relevance, Correctness)
+- [x] Phase 5 — Documentation + deployment polish
+- [ ] Reference-stripping in cleaner (Wikipedia PDFs have noisy citation sections that crowd out body content)
+- [ ] Cross-encoder reranker on retrieved chunks
+- [ ] Cross-encoder validation step for triplets before write
+- [ ] Streaming responses
+- [ ] Per-question routing (vector for single-hop, hybrid for multi-hop)
 
 ---
 
-## API Reference
+## License
 
-### Step Primitive Signature
+MIT — see [LICENSE](LICENSE).
 
-```go
-// Generic step function - supports any return type
-func Step[T any](ctx *Context, id string, fn func() (T, error)) (T, error)
-```
+## Author
 
-### Creating a Workflow
-
-```go
-wf, err := engine.NewWorkflow("./workflow.db")
-if err != nil {
-    log.Fatal(err)
-}
-defer wf.Close()
-
-err = wf.Run("workflow_id", func(ctx *engine.Context) error {
-    // Define your workflow here
-    return nil
-})
-```
-
-### Defining Steps
-
-```go
-// Sequential step
-result, err := engine.Step(ctx, "step_name", func() (ReturnType, error) {
-    // Your side-effect code here
-    return value, nil
-})
-
-// Parallel steps (using goroutines)
-errCh := make(chan error, 2)
-
-go func() {
-    _, err := engine.Step(ctx, "parallel_step_1", func() (string, error) {
-        return "result1", nil
-    })
-    errCh <- err
-}()
-
-go func() {
-    _, err := engine.Step(ctx, "parallel_step_2", func() (string, error) {
-        return "result2", nil
-    })
-    errCh <- err
-}()
-
-// Wait for completion
-for i := 0; i < 2; i++ {
-    if err := <-errCh; err != nil {
-        return err
-    }
-}
-```
-
----
-
-## Troubleshooting
-
-**Issue:** `database is locked` error  
-**Cause:** Multiple concurrent writes without proper synchronization  
-**Solution:** Engine uses mutex protection - ensure you're not opening multiple workflow instances
-
-**Issue:** Steps re-execute every time  
-**Cause:** Workflow ID is changing between runs  
-**Solution:** Use the same workflow ID when resuming
-
-**Issue:** Database file not found  
-**Cause:** Relative path issues  
-**Solution:** Use absolute path or ensure working directory is correct
-
----
-
-## Performance Benchmarks
-
-### Parallel vs Sequential Execution
-
-**Test:** Employee onboarding with 2 parallel steps (laptop + email)
-
-| Execution Mode | Time | Improvement |
-|---------------|------|-------------|
-| Sequential | 6.0s | Baseline |
-| Parallel (Implementation) | 4.4s | **33% faster** |
-
-**Conclusion:** Parallelism provides significant speedup for I/O-bound operations.
-
----
+**Krishna** — Dual Degree EE, IIT Bombay  ·  [22b3968@iitb.ac.in](mailto:22b3968@iitb.ac.in)
