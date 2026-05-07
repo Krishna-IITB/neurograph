@@ -1,41 +1,131 @@
 {
-  "_comment": "Starter QA set. Each entry needs gold_chunk_id once PDFs are ingested; add them after the first ingestion run prints chunk IDs.",
-  "_placeholder": true,
+  "_comment": "Hand-curated gold standard for NeuroGraph evaluation. Each entry has a question, expected answer (used for keyword recall and correctness judging), and topic for analysis.",
   "qa_pairs": [
     {
       "id": "q1",
-      "question": "Who is the CEO of Tesla?",
-      "expected_answer": "Elon Musk",
-      "gold_chunk_id": null,
-      "type": "single_hop"
+      "question": "When was Tesla founded?",
+      "expected_answer": "Tesla was founded in July 2003.",
+      "type": "single_hop",
+      "topic": "Tesla"
     },
     {
       "id": "q2",
-      "question": "How is Elon Musk connected to Mars colonization?",
-      "expected_answer": "Elon Musk founded SpaceX, whose stated mission includes colonizing Mars.",
-      "gold_chunk_id": null,
-      "type": "multi_hop"
+      "question": "Who founded Tesla?",
+      "expected_answer": "Tesla was founded by Martin Eberhard and Marc Tarpenning in 2003.",
+      "type": "single_hop",
+      "topic": "Tesla"
     },
     {
       "id": "q3",
-      "question": "When was Tesla founded?",
-      "expected_answer": "2003",
-      "gold_chunk_id": null,
-      "type": "single_hop"
+      "question": "When did Elon Musk become CEO of Tesla?",
+      "expected_answer": "Elon Musk became CEO of Tesla in October 2008.",
+      "type": "single_hop",
+      "topic": "Tesla"
     },
     {
       "id": "q4",
-      "question": "Which companies has the founder of SpaceX also led?",
-      "expected_answer": "Tesla, Neuralink, The Boring Company, X (formerly Twitter).",
-      "gold_chunk_id": null,
-      "type": "multi_hop"
+      "question": "Where is Tesla headquartered?",
+      "expected_answer": "Tesla is headquartered in Austin, Texas.",
+      "type": "single_hop",
+      "topic": "Tesla"
     },
     {
       "id": "q5",
-      "question": "Who acquired SolarCity?",
-      "expected_answer": "Tesla",
-      "gold_chunk_id": null,
-      "type": "single_hop"
+      "question": "When was SpaceX founded?",
+      "expected_answer": "SpaceX was founded in 2002.",
+      "type": "single_hop",
+      "topic": "SpaceX"
+    },
+    {
+      "id": "q6",
+      "question": "Who founded SpaceX?",
+      "expected_answer": "SpaceX was founded by Elon Musk in 2002.",
+      "type": "single_hop",
+      "topic": "SpaceX"
+    },
+    {
+      "id": "q7",
+      "question": "What is SpaceX's stated goal regarding Mars?",
+      "expected_answer": "SpaceX aims to colonize Mars and make humanity multi-planetary.",
+      "type": "single_hop",
+      "topic": "SpaceX"
+    },
+    {
+      "id": "q8",
+      "question": "Where was Elon Musk born?",
+      "expected_answer": "Elon Musk was born in Pretoria, South Africa.",
+      "type": "single_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q9",
+      "question": "When was Elon Musk born?",
+      "expected_answer": "Elon Musk was born on June 28, 1971.",
+      "type": "single_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q10",
+      "question": "Where did Elon Musk get his bachelor's degrees?",
+      "expected_answer": "Elon Musk received bachelor's degrees from the University of Pennsylvania in 1997.",
+      "type": "single_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q11",
+      "question": "What was Elon Musk's first company?",
+      "expected_answer": "Elon Musk co-founded Zip2 in 1995, his first major company.",
+      "type": "single_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q12",
+      "question": "Who is the CEO and chief engineer of SpaceX?",
+      "expected_answer": "Elon Musk is the CEO and chief engineer of SpaceX.",
+      "type": "single_hop",
+      "topic": "SpaceX"
+    },
+    {
+      "id": "q13",
+      "question": "What companies has Elon Musk founded or co-founded?",
+      "expected_answer": "Elon Musk founded or co-founded Zip2, X.com (which became PayPal), SpaceX, Neuralink, The Boring Company, and xAI.",
+      "type": "multi_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q14",
+      "question": "How is Elon Musk connected to Mars colonization?",
+      "expected_answer": "Elon Musk founded SpaceX in 2002 with the goal of colonizing Mars and making humanity multi-planetary.",
+      "type": "multi_hop",
+      "topic": "cross"
+    },
+    {
+      "id": "q15",
+      "question": "Which company that Elon Musk leads makes electric cars?",
+      "expected_answer": "Tesla, led by Elon Musk, makes electric cars.",
+      "type": "multi_hop",
+      "topic": "cross"
+    },
+    {
+      "id": "q16",
+      "question": "What did X.com become?",
+      "expected_answer": "X.com merged with Confinity to form PayPal.",
+      "type": "single_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q17",
+      "question": "Who acquired PayPal?",
+      "expected_answer": "PayPal was acquired by eBay.",
+      "type": "single_hop",
+      "topic": "Elon Musk"
+    },
+    {
+      "id": "q18",
+      "question": "What is the relationship between Elon Musk and Tesla's founding?",
+      "expected_answer": "Elon Musk did not found Tesla. He joined as an early investor in 2004 and became CEO in October 2008.",
+      "type": "multi_hop",
+      "topic": "Tesla"
     }
   ]
 }

@@ -3,8 +3,12 @@
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-install:  ## Install dependencies
+install:  ## Install dependencies + project as editable package
 	pip install -r requirements.txt
+	pip install -e .
+
+clear-cache:  ## Wipe the semantic cache (use before live demos)
+	python -m scripts.clear_cache
 
 ingest:  ## Ingest PDFs from data/sample_pdfs/
 	python -m scripts.ingest data/sample_pdfs
